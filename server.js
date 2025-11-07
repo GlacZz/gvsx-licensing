@@ -1,8 +1,10 @@
 // ===============================
-//  GVSX Licensing Server (v1.3)
+//  GVSX Licensing Server (v1.4)
 // ===============================
 //  Bloqueia serial em uso indevido entre PCs
+//  Logs aprimorados com nome, e-mail e status detalhado
 // ===============================
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -42,7 +44,7 @@ async function connectDB() {
   await db.collection('serials_pending').createIndex({ serial: 1 }, { unique: true });
   await db.collection('serials_active').createIndex({ serial: 1 }, { unique: true });
   await db.collection('serials_blocked').createIndex({ serial: 1 }, { unique: true });
-  console.log('✅ Conectado ao MongoDB Atlas');
+  console.log('\x1b[32m✅ Conectado ao MongoDB Atlas\x1b[0m');
 }
 
 // ====== API STATUS ======
@@ -59,17 +61,21 @@ app.get('/api/serial/:serial', async (req, res) => {
   const blocked = await db.collection('serials_blocked').findOne({ serial: serialInput });
 
   if (blocked) {
+    console.warn(`\x1b[31m🚫 Consulta: Serial bloqueado → ${serialInput}\x1b[0m`);
     return res.json({ status: 'blocked', message: 'Serial bloqueado.' });
   }
 
   if (active) {
+    console.log(`\x1b[33mℹ️ Consulta: Serial ativo → ${serialInput} | Cliente: ${active.name} <${active.email}>\x1b[0m`);
     return res.json({ status: 'active', message: 'Serial já ativado.', data: active });
   }
 
   if (pending) {
+    console.log(`\x1b[36m🕓 Consulta: Serial pendente → ${serialInput}\x1b[0m`);
     return res.json({ status: 'pending', message: 'Serial disponível para ativação.' });
   }
 
+  console.warn(`\x1b[31m❌ Consulta: Serial inválido → ${serialInput}\x1b[0m`);
   return res.status(404).json({ status: 'error', message: 'Serial inválido.' });
 });
 
@@ -82,13 +88,15 @@ app.post('/api/activate', async (req, res) => {
   const serialInput = serial.trim().toUpperCase();
 
   const blocked = await db.collection('serials_blocked').findOne({ serial: serialInput });
-  if (blocked)
+  if (blocked) {
+    console.warn(`\x1b[31m🚫 BLOQUEADO: Tentativa de uso de serial bloqueado → ${serialInput} | Cliente: ${name} <${email}>\x1b[0m`);
     return res.json({ status: 'blocked', message: 'Este serial foi bloqueado por uso indevido.' });
+  }
 
   const active = await db.collection('serials_active').findOne({ serial: serialInput });
   const pending = await db.collection('serials_pending').findOne({ serial: serialInput });
 
-  // ✅ Caso o serial ainda esteja pendente — primeira ativação
+  // ✅ Primeira ativação (serial pendente)
   if (pending && !active) {
     await db.collection('serials_active').insertOne({
       serial: serialInput,
@@ -99,11 +107,12 @@ app.post('/api/activate', async (req, res) => {
       createdAt: pending.createdAt
     });
     await db.collection('serials_pending').deleteOne({ serial: serialInput });
-    console.log(`✅ Serial ativado: ${serialInput} (${hwid})`);
+
+    console.log(`\x1b[32m✅ NOVA ATIVAÇÃO → Serial: ${serialInput} | Cliente: ${name} <${email}> | HWID: ${hwid}\x1b[0m`);
     return res.json({ status: 'ok', message: 'Licença validada com sucesso.' });
   }
 
-  // ⚠️ Se já estiver ativo e o HWID for diferente → BLOQUEIA
+  // ⚠️ Ativo, mas HWID diferente → Bloqueia
   if (active && active.hwid !== hwid) {
     await db.collection('serials_blocked').insertOne({
       serial: serialInput,
@@ -114,9 +123,9 @@ app.post('/api/activate', async (req, res) => {
       name,
       email
     });
-
     await db.collection('serials_active').deleteOne({ serial: serialInput });
-    console.warn(`🚫 Serial ${serialInput} bloqueado por tentativa em outro HWID!`);
+
+    console.warn(`\x1b[31m🚫 BLOQUEIO AUTOMÁTICO → Serial: ${serialInput} | Cliente: ${name} <${email}> | HWID antigo: ${active.hwid} | Novo HWID: ${hwid}\x1b[0m`);
 
     return res.json({
       status: 'blocked',
@@ -124,15 +133,17 @@ app.post('/api/activate', async (req, res) => {
     });
   }
 
-  // ✅ Se for o mesmo HWID, permite reinstalar normalmente
+  // ✅ Mesmo HWID → Reinstalação
   if (active && active.hwid === hwid) {
+    console.log(`\x1b[34m🔁 REINSTALAÇÃO → Serial: ${serialInput} | Cliente: ${name} <${email}> | HWID: ${hwid}\x1b[0m`);
     return res.json({
       status: 'ok',
       message: 'Licença validada (reinstalação no mesmo PC).'
     });
   }
 
-  // ❌ Caso o serial não exista
+  // ❌ Serial inexistente
+  console.warn(`\x1b[31m❌ ERRO → Serial inválido: ${serialInput} | Cliente: ${name} <${email}>\x1b[0m`);
   return res.status(404).json({
     status: 'error',
     message: 'Serial inválido.'
@@ -143,5 +154,5 @@ app.post('/api/activate', async (req, res) => {
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   await connectDB();
-  console.log(`🚀 Servidor GVSX Licensing rodando na porta ${PORT}`);
+  console.log(`\x1b[35m🚀 Servidor GVSX Licensing rodando na porta ${PORT}\x1b[0m`);
 });
