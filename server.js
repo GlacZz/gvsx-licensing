@@ -4,7 +4,6 @@
 // by Vinícius Cajazeira
 // Licenciamento seguro para instaladores GVSX
 // ===============================
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -13,19 +12,33 @@ const rateLimit = require('express-rate-limit');
 const { MongoClient } = require('mongodb');
 
 const app = express();
+
+// ✅ Corrige uso de proxies reversos (Render, Vercel, etc)
+app.set('trust proxy', 1);
+
+// Middlewares essenciais
 app.use(express.json());
 app.use(helmet());
 
-// CORS configurado apenas para o domínio da GVSX
+// ✅ CORS restrito ao seu domínio
 app.use(cors({
-  origin: ['https://gvsxmod.com.br', 'http://localhost:3000']
+  origin: [
+    'https://gvsxmod.com.br',
+    'http://localhost:3000'
+  ],
+  optionsSuccessStatus: 200
 }));
 
-// Limite de requisições (60 por minuto por IP)
+// ✅ Limite de requisições — evita spam de ativação
 const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  message: { status: "error", message: "Muitas requisições. Tente novamente em 1 minuto." }
+  windowMs: 60 * 1000, // 1 minuto
+  max: 60, // 60 requisições por IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { 
+    status: "error",
+    message: "Muitas requisições. Tente novamente em 1 minuto."
+  }
 });
 app.use(limiter);
 
@@ -171,3 +184,4 @@ app.listen(PORT, async () => {
   await connectDB();
   console.log(`🚀 Servidor GVSX Licensing rodando na porta ${PORT}`);
 });
+
