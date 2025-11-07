@@ -122,18 +122,11 @@ app.get('/api/serial/:serial', async (req, res) => {
 });
 
 // ===============================
-//  Ativação de Serial (POST)
+//  Ativação de Serial
 // ===============================
 app.post('/api/activate', async (req, res) => {
   try {
     const { name, email, serial, hwid } = req.body;
-
-    console.log('=== Requisição recebida ===');
-    console.log('Nome:', name);
-    console.log('Email:', email);
-    console.log('Serial:', serial);
-    console.log('HWID:', hwid);
-    console.log('===========================');
 
     if (!name || !email || !serial || !hwid) {
       return res.status(400).json({
@@ -144,53 +137,64 @@ app.post('/api/activate', async (req, res) => {
 
     const serialInput = serial.trim().replace(/\s+/g, '').toUpperCase();
 
-    const activeSerial = await db.collection('serials_active').findOne({
-      serial: { $regex: `^${serialInput}$`, $options: 'i' }
-    });
-
-    // 🔹 Caso já esteja ativo
-    if (activeSerial) {
-      if (activeSerial.hwid === hwid) {
-        console.log('Licença já vinculada a este computador.');
-        return res.json({ status: "ok", message: "Licença já ativada nesta máquina." });
-      } else {
-        console.log('Tentativa de ativação em outro PC.');
-        return res.json({ status: "error", message: "Licença já ativada em outro computador." });
-      }
-    }
-
+    // Verifica se o serial está pendente
     const pendingSerial = await db.collection('serials_pending').findOne({
       serial: { $regex: `^${serialInput}$`, $options: 'i' }
     });
 
+    // Verifica se o serial já está ativo
+    const activeSerial = await db.collection('serials_active').findOne({
+      serial: { $regex: `^${serialInput}$`, $options: 'i' }
+    });
+
+    // Caso já esteja ativo, verifica o HWID
+    if (activeSerial) {
+      if (activeSerial.hwid === hwid) {
+        console.log(`🔁 Licença já validada anteriormente: ${serialInput} (${hwid})`);
+        return res.json({
+          status: "ok",
+          message: "Licença validada com sucesso."
+        });
+      } else {
+        console.log(`⚠️ Tentativa de ativação em outro PC (${serialInput})`);
+        return res.status(403).json({
+          status: "error",
+          message: "Licença inválida, ou ativada em outro computador."
+        });
+      }
+    }
+
+    // Se o serial não estiver na lista de pendentes
     if (!pendingSerial) {
-      console.log('❌ Serial não encontrado.');
       return res.status(404).json({
         status: "error",
         message: "Serial inválido."
       });
     }
 
-    // ✅ Move o serial para a coleção de ativos
+    // Move o serial para a coleção de ativos
     await db.collection('serials_active').insertOne({
       serial: pendingSerial.serial,
       name,
       email,
       hwid,
       activatedAt: new Date(),
-      createdAt: pendingSerial.createdAt || new Date()
+      createdAt: pendingSerial.createdAt
     });
 
+    // Remove da lista de pendentes
     await db.collection('serials_pending').deleteOne({ _id: pendingSerial._id });
 
-    console.log(`✅ Serial ativado: ${serialInput} por ${name} (${email}) [${hwid}]`);
+    console.log(`✅ Licença validada e vinculada: ${serialInput} (${hwid})`);
 
-    res.json({
+    // Retorna mensagem amigável
+    return res.json({
       status: "ok",
-      message: "Licença validada e ativada com sucesso."
+      message: "Licença validada com sucesso."
     });
+
   } catch (err) {
-    console.error("❌ Erro ao ativar serial:", err);
+    console.error("Erro ao ativar serial:", err);
     res.status(500).json({
       status: "error",
       message: "Erro interno do servidor."
@@ -206,3 +210,4 @@ app.listen(PORT, async () => {
   await connectDB();
   console.log(`🚀 Servidor GVSX Licensing rodando na porta ${PORT}`);
 });
+
